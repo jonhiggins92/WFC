@@ -1,14 +1,16 @@
 extends Node2D
 
+@onready var grid_manager: Node = $GridManager
+
 var tile_rules = {
 	"grass": ["grass", "road", 'water'],
 	"road": ["road", "grass" ],
 	"water": ["water", 'grass'],
 	'forest': ['grass', 'forest']
 }
-var grid_size = Vector2(20,20)
+var grid_size = Vector2(50,50)
 var grid = []
-
+@export var speed = 100
 
 # Called when the node enters the scene tree for the first time.
 func _ready() -> void:
@@ -30,6 +32,12 @@ func _process(delta: float) -> void:
 		await wave_function_collapse()
 		post_process_tiles()
 		clear_tilemap2()
+
+func initialize_grid():
+	for x in range(grid_size.x):
+		grid.append([])
+		for y in range(grid_size.y):
+			grid[x].append(['grass', 'water', 'road'])
 
 func clear_tilemap2():
 	var tile_map = $TileMapLayer
@@ -58,11 +66,7 @@ func reset_grid():
 			grid[x].append(['grass', 'water', 'road'])
 
 
-func initialize_grid():
-	for x in range(grid_size.x):
-		grid.append([])
-		for y in range(grid_size.y):
-			grid[x].append(['grass', 'water', 'road'])
+
 
 
 func visualize_grid():
@@ -107,7 +111,7 @@ func collapse_cell(position: Vector2i):
 	# Highlight the current cell
 	var tile_map_2 = $TileMapLayer2
 	tile_map_2.set_cell(position, 1, get_tile_id('highlight'))
-	await get_tree().create_timer(0.1).timeout
+	await get_tree().create_timer(.01).timeout
 	tile_map_2.set_cell(position, 1, Vector2i(-1, -1))
 
 	
@@ -154,7 +158,7 @@ func wave_function_collapse():
 		var position = select_least_entropy_cell()
 		collapse_cell(position)
 		propagate_constraints(position)
-		await get_tree().create_timer(0.001).timeout
+		await get_tree().create_timer(1 / 1000).timeout
 		
 func is_grid_collapsed() -> bool:
 	for row in grid:
@@ -180,40 +184,46 @@ func select_least_entropy_cell() -> Vector2i:
 	return min_position
 	
 	
-func post_process_tiles():
+func post_process_tiles() -> void:
 	var tile_map = $TileMapLayer
-	
+	var tile_map_2 = $TileMapLayer2
+
 	for x in range(grid_size.x):
 		for y in range(grid_size.y):
-			var position = Vector2i(x,y)
-			
-			if grid[x][y][0] == 'water' and is_surrounded_by(position, 'grass'):
-				grid[x][y] = ['grass']
-				tile_map.set_cell(position, 0, get_tile_id('grass'))
-				var tile_map_2 = $TileMapLayer2
-				tile_map_2.set_cell(position, 1, get_tile_id('highlight'))
+			var position = Vector2i(x, y)
+			var current_tile = grid[x][y][0]
+			var surrounding_tile = get_dominant_surrounding_tile(position)
+
+			# General rule: Convert to the dominant surrounding tile
+			if surrounding_tile != "" and surrounding_tile != current_tile:
+				grid[x][y] = [surrounding_tile]
+				tile_map.set_cell(position, 0, get_tile_id(surrounding_tile))
+				tile_map_2.set_cell(position, 1, get_tile_id("highlight"))
 				
-			
-			if grid[x][y][0] == 'grass' and is_surrounded_by(position, 'water'):
-				grid[x][y] = ['water']
-				tile_map.set_cell(position, 0, get_tile_id('water'))
-				var tile_map_2 = $TileMapLayer2
-				tile_map_2.set_cell(position, 1, get_tile_id('highlight'))
+
+			# Special rule: Grass surrounded by grass turns into forest
+			if grid[x][y][0] == "grass" and surrounding_tile == "grass":
+				grid[x][y] = ["forest"]
+				tile_map.set_cell(position, 2, get_tile_id("forest"))
+				tile_map_2.set_cell(position, 1, get_tile_id("highlight"))
+				clear_tilemap2()
+
 				
-			if grid[x][y][0] == 'road' and is_surrounded_by(position, 'grass'):
-				grid[x][y] = ['grass']
-				tile_map.set_cell(position, 0, get_tile_id('grass'))
-				var tile_map_2 = $TileMapLayer2
-				tile_map_2.set_cell(position, 1, get_tile_id('highlight'))
-				
-			if grid[x][y][0] == 'grass' and is_surrounded_by(position, 'grass'):
-				var tile_map_2 = $TileMapLayer2
-				grid[x][y] = ['forest']
-				tile_map_2.set_cell(position, 2, Vector2i(0,0))
-				await get_tree().create_timer(0.1).timeout
-				tile_map.set_cell(position, 2, get_tile_id('forest'))
-				
-			
+func get_dominant_surrounding_tile(position: Vector2i) -> String:
+	var neighbors = get_neighbors(position)
+	var tile_count = {}
+
+	for neighbor in neighbors:
+		var neighbor_tile = grid[neighbor.x][neighbor.y][0]
+		tile_count[neighbor_tile] = tile_count.get(neighbor_tile, 0) + 1
+
+	# Find the most common tile type
+	for tile in tile_count:
+		if tile_count[tile] == 4:  # Only return if all 4 surrounding tiles match
+			return tile
+
+	return ""  # Return empty if no dominant tile type
+
 			
 func is_surrounded_by(position: Vector2i, tile_type: String) -> bool:
 	var directions = [
